@@ -68,6 +68,12 @@ if __name__ == '__main__':
     assert pub.encode('p2wsh') == 'bc1qgatzazqjupdalx4v28pxjlys2s3yja9gr3xuca3ugcqpery6c3squ55wct'
     with assert_exception(ValueError):
         pub.encode('fubar')
+    key1 = '0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8'
+    key2 = '0378d430274f8c5ec1321338151e9f27f4c676a008bdf8638d07c0b6be9ab35c71'
+    assert PublicKey(key1).encode('hex') == key1
+    assert PublicKey(key2).encode('hex') == key2
+    with assert_exception(ValueError):
+        PublicKey(key2).encode('so not a public key')
     
     addresses = [
         '1C7zdTfnkzmr13HfA2vNm5SJYRK6nEKyq8',
@@ -194,6 +200,20 @@ if __name__ == '__main__':
     pkc = bitcoin.encode_privkey(pk, 'bin_compressed')
     assert PrivateKey(pk).pub().encode('p2pkh', compressed=True) == bitcoin.privtoaddr(pkc)
     
+    # segwit tests
+    t = Transaction.deserialize_hex('02000000000101a5bc96c36f1ae114a982196539c892a83fc0872e8ec17bddf3a58b87f732e8f50100000017160014e6a56184802dde75a7d99abffa1f52a10e2f1100feffffff0200e1f505000000001976a9140f560846934f203108348aa3866e1fe3185971df88ac7c557d920000000017a914eccc640fca9aa4eb88cf1fb7015f5ec279941bf5870247304402203623eb0ca85920c70687d7943b5e16271dd260e4a4dbd52940ba22f975b01f3902206b29d06c65a703b24da08e3ef03e548f7453024a32aa195469ff4253c5824bee012103f404f9b2baa48322792adba5d333afe7f66f1488955b16311a17e6a6734a9a72c3000000')
+    assert t.hash() == 'dc142832892a10fb14d2409c8f771223515c9d6073ef018f6d6261a6b26831ee'
+    assert len(t.inputs[0].witness) == 2
+    tx_hex = '010000000001018d6f79531a0468b7fba03a6ab3ae1cec4b1326219dce51199453de332fda8d4e0000000000fdffffff0122ca010000000000220020c445adf3a53f0079d3cad994dffc9044e2197f460b2d65d144c968366cdad021feffffffff7dd50100000000000000050047304402204a6cf9880846bf7ee4f46d86c5f657128ae0e8c2c21c7456e02a741bca104dce02202a199b3a220ce56ed3a99330228d7c5bf2d3adff785b602909289eaeb800ce820101ff01fffd0201524c53ff02aa7ed3015e0ede1480000001eee56ec14bd0108027229918303472f7e0ec6adf139fb0c994d70e18faea9d4a027fc28ff26d55d1dd232fd9b931c09c80e5611718854e047aa3f5892e676f84d7000000004c53ff02aa7ed301532d06d580000001415e0d04a848bd9b86a681ce02561a59d9d8c5b8b593b3f2f6c5dcbe72b46cce02984685b96551b7634dc58ec6435946a313f13f53b631a118b1b2126fc8b484a5000000004c53ff02aa7ed301a12768c680000001bf3650dcbb48104acad66840fb2e6e2f8cc80d617766379c1ac5ea9d8d574bb702c8869066c231b0cca9ae2536bb82dbe96241d05f0a1f5dbcd78897243f16306f0000000053ae76710800'
+    t = Transaction.deserialize_hex(tx_hex)
+    assert t.inputs[0].value == 120189
+    assert t.inputs[0].witness_version == 0
+    assert not t.is_coinbase()
+    assert len(t.inputs[0].witness) == 5
+    
+    tx_hex = '01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff08044c86041b020602ffffffff0100f2052a010000004341041b0e8c2567c12536aa13357b79a073dc4444acb83c4ec7a0e2f99dd7457516c5817242da796924ca4e99947d087fedf9ce467cb9f7c6287078f801df276fdf84ac00000000'
+    t = Transaction.deserialize_hex(tx_hex)
+    assert t.is_coinbase()
     
     version = bytes.fromhex('721101000100000000000000bc8f5e5400000000010000000000000000000000000000000000ffffc61b6409208d010000000000000000000000000000000000ffffcb0071c0208d128035cbc97953f80f2f5361746f7368693a302e392e332fcf05050001')
 
@@ -446,3 +466,4 @@ if __name__ == '__main__':
     print(electrum.get_response('blockchain.block.header', [1]))
     print(electrum.get_response('blockchain.estimatefee', [2]))
     print(electrum.get_response('blockchain.relayfee', []))
+    

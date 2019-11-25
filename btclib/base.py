@@ -168,6 +168,50 @@ class Transaction(Serializable):
         ('inputs', List(TxInput)),
         ('outputs', List(TxOutput)),
         ('lock_time', UnsignedInteger())]
+        
+    @classmethod
+    def serialize(cls, obj):
+        return b''.join(
+            sedes.serialize(getattr(obj, field))
+            for field, sedes in cls.fields)
+    
+    @classmethod
+    def deserialize(cls, f):
+        fb = io.BufferedReader(f, buffer_size=1)
+        version = UnsignedInteger().deserialize(fb)
+        
+        marker, flag = 0, 0
+        if fb.peek(1).startswith(b'\x00'):
+            marker = UnsignedInteger(8).deserialize(fb)
+            flag = UnsignedInteger(8).deserialize(fb)
+            if flag != 1:
+                raise SerializationError('unsupported tx flag %s' % (flag,))
+        
+        inputs = List(TxInput).deserialize(fb)
+        outputs = List(TxOutput).deserialize(fb)
+        
+        if flag:
+            for i, txin in enumerate(inputs):
+                n = CompactSize().deserialize(fb)
+                if n == 0:
+                    txin.witness = b'\x00'
+                    continue
+                if n == 0xffffffff: # electrum partial segwit serialization
+                    txin.value = UnsignedInteger(64).deserialize(fb)
+                    txin.witness_version = UnsignedInteger(16).deserialize(fb)
+                    n = CompactSize().deserialize(fb)
+                    # now 'n' is the number of items in the witness
+                txin.witness = []
+                if n > 1024:
+                    raise SerializationError('too many items on witness stack %i:%i' % (i,n))
+                for j in range(n):
+                    txin.witness.append(VarBytestring().deserialize(fb))
+        
+        lock_time = UnsignedInteger().deserialize(fb)
+        tx = cls(version, inputs, outputs, lock_time)
+        tx.marker = marker
+        tx.flag = flag
+        return tx
     
     def hex(self):
         return Transaction.serialize(self).hex()

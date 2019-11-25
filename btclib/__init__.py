@@ -377,11 +377,15 @@ class PrivateKey(object):
         return PrivateKey(s.to_bytes(32, 'big'), self.compressed, self.network)
 
 class PublicKey(object):
-    def __init__(self, pubkey_sec_bin, compressed=None, network=None):
-        self.network = network or mainnet # ? see priv not
-        # TODO: allow a string ... and convert it
-        self.key = crypto.ec_pubkey_decompress(pubkey_sec_bin) # always store decompressed
-        self.compressed = compressed if compressed is not None else len(pubkey_sec_bin) == 33
+    def __init__(self, pubkey_sec, compressed=None, network=None):
+        self.network = network or mainnet
+        if isinstance(pubkey_sec, str):
+            if len(pubkey_sec) in (130, 66):
+                pubkey_sec = bytes.fromhex(pubkey_sec)
+            else:
+                raise InvalidKeyException('invalid public key')
+        self.key = crypto.ec_pubkey_decompress(pubkey_sec) # always store decompressed
+        self.compressed = compressed if compressed is not None else len(pubkey_sec) == 33
     
     def point(self):
         x = int.from_bytes(self.key[1:33], 'big')
