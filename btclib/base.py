@@ -218,6 +218,9 @@ class Transaction(Serializable):
     
     def hash(self):
         return txhash(serialize(self))
+        
+    def is_segwit(self):
+        return self.get('flag', None) == 1 and self.get('marker', None) == 0
     
     def is_coinbase(self):
         return (len(self.inputs) == 1 
