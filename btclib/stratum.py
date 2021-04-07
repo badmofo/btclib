@@ -33,6 +33,9 @@ import traceback
 
 class ConnectionError(Exception):
     pass
+    
+class ElectrumError(Exception):
+    pass
 
 class ElectrumInterface(object):
     """Interface for interacting with Electrum servers using the
@@ -47,6 +50,15 @@ class ElectrumInterface(object):
         self.debug = debug
         self.is_connected = False
         self.connect()
+        
+    def __del__(self):
+        self.is_connected = False
+        if self.sock:
+            try:
+                self.sock.close()
+            except:
+                pass
+            self.sock = None
 
     def connected(self):
         return self.is_connected
@@ -108,13 +120,11 @@ class ElectrumInterface(object):
 
                     if id == target_id:
                         if error:
-                            raise Exception("Received error '%s'!" % message)
+                            raise ElectrumError("Received error '%s'!" % error)
                         else:
                             return result
         except KeyboardInterrupt:
             raise
-        except:
-            traceback.print_exc(file=sys.stdout)
         self.is_connected = False
 
     def get_response(self, method, params):
