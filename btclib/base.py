@@ -180,7 +180,7 @@ class Transaction(Serializable):
         fb = io.BufferedReader(f, buffer_size=1)
         version = UnsignedInteger().deserialize(fb)
         
-        marker, flag = 0, 0
+        marker, flag = None, None
         if fb.peek(1).startswith(b'\x00'):
             marker = UnsignedInteger(8).deserialize(fb)
             flag = UnsignedInteger(8).deserialize(fb)
@@ -220,7 +220,7 @@ class Transaction(Serializable):
         return txhash(serialize(self))
         
     def is_segwit(self):
-        return self.get('flag', None) == 1 and self.get('marker', None) == 0
+        return getattr(self, 'flag', None) == 1 and getattr(self, 'marker', None) == 0
     
     def is_coinbase(self):
         return (len(self.inputs) == 1 
