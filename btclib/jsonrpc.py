@@ -1,4 +1,5 @@
 import requests
+import requests.utils
 import collections
 import decimal
 import urllib.parse
@@ -6,6 +7,10 @@ import simplejson as json
 
 
 def extract_auth_from_url(url):
+    parts = urllib.parse.urlparse(url)
+    return parts.username, parts.password, requests.utils.urldefragauth(url)
+
+def extract_auth_from_url2(url):
     scheme, netloc, path, query, fragment = urllib.parse.urlsplit(url)
     user_password, host_port = urllib.parse.splituser(netloc)
     user, password = urllib.parse.splitpasswd(user_password) if user_password else (None, None)
