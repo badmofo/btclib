@@ -332,7 +332,9 @@ if __name__ == '__main__':
         'scriptPubKey': script_pubkey.hex(),
     } for i in inputs]
     print(rpc_inputs)
-    print(service.signrawtransactionwithwallet(signed.hex(), rpc_inputs))
+    response = service.signrawtransactionwithkey(signed.hex(), [], rpc_inputs)
+    assert response['complete']
+    print(json.dumps(response, indent=1))    
     
     # TX Multisigning Test
     hd_priv = HDPrivateKey.from_seed('test')
@@ -371,7 +373,9 @@ if __name__ == '__main__':
         'redeemScript': redeem_script.hex(),
     } for i in inputs]
     print(rpc_inputs)
-    print(json.dumps(service.signrawtransactionwithwallet(Transaction.serialize(tx).hex(), rpc_inputs), indent=1))
+    response = service.signrawtransactionwithkey(Transaction.serialize(tx).hex(), [], rpc_inputs)
+    assert response['complete']
+    print(json.dumps(response, indent=1))
     
     '''
     info = service.getinfo()
@@ -446,11 +450,12 @@ if __name__ == '__main__':
         'redeemScript': redeem_script_final.hex(),
     } for i in inputs]
     print(rpc_inputs)
-    print(json.dumps(service.signrawtransactionwithwallet(Transaction.serialize(tx).hex(), rpc_inputs), indent=1))
+    response = service.signrawtransactionwithkey(Transaction.serialize(tx).hex(), [], rpc_inputs)
+    assert response['complete']
+    print(json.dumps(response, indent=1))
     
     
     hostname, port = 'us.electrum.be', 50001
-    hostname, port = '185.64.116.15', 50001
     with assert_exception(ConnectionError):
         ElectrumInterface(hostname, 60000)
     electrum = ElectrumInterface(hostname, port)
