@@ -49,6 +49,7 @@ class ElectrumInterface(object):
         self.connection = (host, port)
         self.debug = debug
         self.is_connected = False
+        self.sock = None
         self.connect()
         
     def __del__(self):
