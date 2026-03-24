@@ -77,9 +77,9 @@ class CompactSize(Serializable):
     @classmethod
     def deserialize(cls, f):
         size = int.from_bytes(read_fully(f, 1), 'little')
-        bytes = 1 << max(size - 252, 0)
-        if bytes > 1:
-            size = int.from_bytes(f.read(bytes), 'little')
+        extra = 1 << max(size - 252, 0)
+        if extra > 1:
+            size = int.from_bytes(read_fully(f, extra), 'little')
         return size
 
 def List(ser):

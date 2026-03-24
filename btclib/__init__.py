@@ -451,7 +451,7 @@ def message_verify(message, signature):
         pubkey_sec = crypto.ecdsa_recover(message_hash, sig_compact, recovery_id)
         return PublicKey(pubkey_sec, compressed=compressed)
     except Exception:
-        pass
+        return False
 
 
 def bip32_deserialize(data):
@@ -533,8 +533,13 @@ class HDPrivateKey(HDKey):
         else:
             data = self.pub().encode('bin', compressed=True) + s
         I = hmac_sha512(self.chaincode, data)
+        IL = int.from_bytes(I[:32], 'big')
+        if IL >= Secp256k1.N:
+            raise InvalidKeyException('derived key is invalid (IL >= N); skip this index')
         c = I[32:]
-        k = self.priv() + int.from_bytes(I[:32], 'big')
+        k = self.priv() + IL
+        if k.secret == 0:
+            raise InvalidKeyException('derived key is invalid (zero key); skip this index')
         return HDPrivateKey(depth, fingerprint, n, c, k, self.address_format)
 
 class HDPublicKey(HDKey):
@@ -573,7 +578,10 @@ class HDPublicKey(HDKey):
             s = n
             n = depth = 0
         I = hmac_sha512(self.chaincode, self.key.encode('bin') + s)
-        K = self.key + int.from_bytes(I[:32], 'big')
+        IL = int.from_bytes(I[:32], 'big')
+        if IL >= Secp256k1.N:
+            raise InvalidKeyException('derived key is invalid (IL >= N); skip this index')
+        K = self.key + IL
         c = I[32:]
         return HDPublicKey(depth, fingerprint, n, c, K, self.address_format)
 
