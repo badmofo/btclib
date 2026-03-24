@@ -1,7 +1,7 @@
 import time
 import socket
 import io
-import random
+import secrets
 from btclib import *
 from btclib.base import *
 
@@ -58,7 +58,7 @@ class Node(object):
         addr_to.port = self.port        
         MY_VERSION = 31800
         MY_USER_AGENT = b'/Node:1.0.0/' # TODO: does this have any significance?
-        nonce = random.randint(0, 0xFFFFFFFFFFFFFFFF)
+        nonce = int.from_bytes(secrets.token_bytes(8), 'big')
         version = Version(MY_VERSION, 1, int(time.time()), addr_to, addr_from, nonce, MY_USER_AGENT, 0xFFFFFFFF)
         
         self.s = socket.create_connection((self.host, self.port))
@@ -81,13 +81,12 @@ class Node(object):
     
     def recv_fully(self, n):
         buffer = b''
-        while True:
+        while len(buffer) < n:
             bytes_read = self.s.recv(n - len(buffer))
-            buffer += bytes_read
-            if n >= len(buffer):
-                return buffer
             if not bytes_read:
                 raise Exception('short read')
+            buffer += bytes_read
+        return buffer
     
     def recv_message(self):
         network = self.recv_fully(4)
