@@ -286,6 +286,50 @@ if __name__ == '__main__':
         'version': 1}
     
     
+    # SegWit: sign / verify / serialize round-trip (P2WPKH)
+    _priv = PrivateKey(sha256(b'segwit test key'), compressed=True)
+    _spk = addr_to_script(_priv.pub().encode('p2wpkh'))  # OP_0 <20-byte-hash>
+    _value = 50000000  # 0.5 BTC
+    _inputs = [{'txid': 'aa' * 32, 'n': 0}]
+    _outputs = {'1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa': 49990000}
+    _tx = mktx(_inputs, _outputs)
+    _tx.inputs[0].sequence = 0xffffffff
+    _tx.sign_segwit_input(0, _spk, _priv, _value)
+    assert _tx.is_segwit()
+    assert len(_tx.inputs[0].witness) == 2
+    assert _tx.verify_segwit_input(0, _spk, _value)
+    assert not _tx.verify_segwit_input(0, _spk, _value + 1)  # wrong value fails
+
+    # Serialization round-trip
+    _tx_hex = _tx.hex()
+    _tx2 = Transaction.deserialize_hex(_tx_hex)
+    assert _tx2.is_segwit()
+    assert _tx2.verify_segwit_input(0, _spk, _value)
+    assert _tx2.hex() == _tx_hex
+    assert _tx.hash() == _tx2.hash()  # txid uses non-witness bytes
+
+    # Tampered witness fails
+    _tx3 = Transaction.deserialize_hex(_tx_hex)
+    _tx3.inputs[0].witness[0] = b'\xff' + _tx3.inputs[0].witness[0][1:]
+    assert not _tx3.verify_segwit_input(0, _spk, _value)
+
+    # Multi-input: each input signed independently, cross-key verify fails
+    _priv2 = PrivateKey(sha256(b'second segwit key'), compressed=True)
+    _spk2 = addr_to_script(_priv2.pub().encode('p2wpkh'))
+    _tx4 = mktx([{'txid': 'bb' * 32, 'n': 0}, {'txid': 'cc' * 32, 'n': 1}],
+                {'1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa': 99990000})
+    for _i in range(2): _tx4.inputs[_i].sequence = 0xffffffff
+    _tx4.sign_segwit_input(0, _spk,  _priv,  60000000)
+    _tx4.sign_segwit_input(1, _spk2, _priv2, 40000000)
+    assert _tx4.verify_segwit_input(0, _spk,  60000000)
+    assert _tx4.verify_segwit_input(1, _spk2, 40000000)
+    assert not _tx4.verify_segwit_input(0, _spk2, 60000000)  # wrong key
+    _tx4b = Transaction.deserialize_hex(_tx4.hex())
+    assert _tx4b.verify_segwit_input(0, _spk,  60000000)
+    assert _tx4b.verify_segwit_input(1, _spk2, 40000000)
+
+    print('segwit tests passed')
+
     chain = BitcoindChain(os.environ['BITCOIND_URL'])
     
     '''

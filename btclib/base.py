@@ -2,7 +2,7 @@ import io
 import json
 import copy
 
-from btclib import sha256, dsha256, grok, b58check_decode, PublicKey, derive_compact_xpub
+from btclib import sha256, dsha256, hash160, grok, b58check_decode, PublicKey, derive_compact_xpub
 from btclib.segwit_addr import bech32_decode, segwit_decode
 
 class SerializationError(Exception):
@@ -149,7 +149,7 @@ class TxOutput(Serializable):
         ('value', UnsignedInteger(64)),
         ('script', Script)]
 
-from btclib.script import compile_script, parse_multisig_p2sh_script_sig  # TODO: straighten out deps
+from btclib.script import compile_script, parse_multisig_p2sh_script_sig, p2wpkh_script_code  # TODO: straighten out deps
 
 SIGHASH_ALL = 1
 SIGHASH_NONE = 2
@@ -168,13 +168,31 @@ class Transaction(Serializable):
         ('inputs', List(TxInput)),
         ('outputs', List(TxOutput)),
         ('lock_time', UnsignedInteger())]
-        
+
     @classmethod
-    def serialize(cls, obj):
+    def _legacy_serialize(cls, obj):
         return b''.join(
             sedes.serialize(getattr(obj, field))
             for field, sedes in cls.fields)
-    
+
+    @classmethod
+    def serialize(cls, obj):
+        if obj.is_segwit():
+            out = obj.version.to_bytes(4, 'little')
+            out += b'\x00\x01'
+            out += List(TxInput).serialize(obj.inputs)
+            out += List(TxOutput).serialize(obj.outputs)
+            for inp in obj.inputs:
+                witness = getattr(inp, 'witness', [])
+                if not isinstance(witness, list):
+                    witness = []
+                out += CompactSize.serialize(len(witness))
+                for item in witness:
+                    out += VarBytestring.serialize(item)
+            out += obj.lock_time.to_bytes(4, 'little')
+            return out
+        return cls._legacy_serialize(obj)
+
     @classmethod
     def deserialize(cls, f):
         fb = io.BufferedReader(f, buffer_size=1)
@@ -217,15 +235,86 @@ class Transaction(Serializable):
         return Transaction.serialize(self).hex()
     
     def hash(self):
-        return txhash(serialize(self))
+        return txhash(self._legacy_serialize(self))
         
     def is_segwit(self):
         return getattr(self, 'flag', None) == 1 and getattr(self, 'marker', None) == 0
     
     def is_coinbase(self):
-        return (len(self.inputs) == 1 
+        return (len(self.inputs) == 1
             and self.inputs[0].n == 0xFFFFFFFF
             and self.inputs[0].txid == COINBASE_TXID)
+
+    def segwit_signature_hash(self, i, script_code, value, sighash=SIGHASH_ALL):
+        """BIP143 digest algorithm for segwit v0 inputs (P2WPKH and P2WSH)."""
+        base = sighash & 0x1f
+
+        if not (sighash & SIGHASH_ANYONECANPAY):
+            hash_prevouts = dsha256(b''.join(
+                inp.txid[::-1] + inp.n.to_bytes(4, 'little')
+                for inp in self.inputs))
+        else:
+            hash_prevouts = b'\x00' * 32
+
+        if not (sighash & SIGHASH_ANYONECANPAY) and base not in (SIGHASH_SINGLE, SIGHASH_NONE):
+            hash_sequence = dsha256(b''.join(
+                inp.sequence.to_bytes(4, 'little') for inp in self.inputs))
+        else:
+            hash_sequence = b'\x00' * 32
+
+        if base not in (SIGHASH_SINGLE, SIGHASH_NONE):
+            hash_outputs = dsha256(b''.join(
+                out.value.to_bytes(8, 'little') + Script.serialize(out.script)
+                for out in self.outputs))
+        elif base == SIGHASH_SINGLE and i < len(self.outputs):
+            out = self.outputs[i]
+            hash_outputs = dsha256(out.value.to_bytes(8, 'little') + Script.serialize(out.script))
+        else:
+            hash_outputs = b'\x00' * 32
+
+        inp = self.inputs[i]
+        preimage = (
+            self.version.to_bytes(4, 'little') +
+            hash_prevouts +
+            hash_sequence +
+            inp.txid[::-1] + inp.n.to_bytes(4, 'little') +
+            Script.serialize(script_code) +
+            value.to_bytes(8, 'little') +
+            inp.sequence.to_bytes(4, 'little') +
+            hash_outputs +
+            self.lock_time.to_bytes(4, 'little') +
+            sighash.to_bytes(4, 'little')
+        )
+        return dsha256(preimage)
+
+    def sign_segwit_input(self, i, script_pubkey, priv, value, sighash=SIGHASH_ALL):
+        """Sign a native P2WPKH input, writing sig+pubkey to the witness stack."""
+        script_code = p2wpkh_script_code(script_pubkey)
+        txhash = self.segwit_signature_hash(i, script_code, value, sighash)
+        sig = priv.ecdsa_raw_sign(txhash) + sighash.to_bytes(1, 'little')
+        self.inputs[i].script = b''
+        self.inputs[i].witness = [sig, priv.pub().encode('bin', compressed=True)]
+        self.marker = 0
+        self.flag = 1
+
+    def verify_segwit_input(self, i, script_pubkey, value):
+        """Verify a native P2WPKH input against its witness stack."""
+        inp = self.inputs[i]
+        witness = getattr(inp, 'witness', None)
+        if not isinstance(witness, list) or len(witness) != 2:
+            return False
+        sig, pub = witness
+        if len(sig) < 2:
+            return False
+        sig_der, sighash_byte = sig[:-1], sig[-1]
+        if hash160(pub) != script_pubkey[2:]:
+            return False
+        script_code = p2wpkh_script_code(script_pubkey)
+        txhash = self.segwit_signature_hash(i, script_code, value, sighash_byte)
+        try:
+            return PublicKey(pub).ecdsa_raw_verify(txhash, sig_der)
+        except Exception:
+            return False
 
     def signature_form(self, i, script_pubkey, sighash=SIGHASH_ALL):
         tx = copy.deepcopy(self)

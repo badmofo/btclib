@@ -110,6 +110,13 @@ def script_to_addr(script, network=mainnet):
         return segwit_encode(network.hrp, 0, spk[2:])
     
 
+def p2wpkh_script_code(script_pubkey):
+    """BIP143 script code for a P2WPKH input given its scriptPubKey (OP_0 <20-byte-hash>)."""
+    pubkey_hash = script_pubkey[2:]
+    return compile_script([
+        Script.OP_DUP, Script.OP_HASH160, pubkey_hash,
+        Script.OP_EQUALVERIFY, Script.OP_CHECKSIG])
+
 def p2sh_addr(script, network=mainnet):
     return b58check_encode(hash160(script), network['p2sh'])
 
