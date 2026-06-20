@@ -88,12 +88,16 @@ class Node(object):
             buffer += bytes_read
         return buffer
     
+    MAX_P2P_MESSAGE_SIZE = 32 * 1024 * 1024  # 32 MiB; matches Bitcoin Core's limit for block messages
+
     def recv_message(self):
         network = self.recv_fully(4)
         if network != self.network:
             raise Exception('network mismatch')
         command = self.recv_fully(12).replace(b'\00', b'')
         length = int.from_bytes(self.recv_fully(4), 'little')
+        if length > self.MAX_P2P_MESSAGE_SIZE:
+            raise Exception('message too large: %d bytes' % length)
         checksum = self.recv_fully(4)
         data = self.recv_fully(length)
         if checksum != dsha256(data)[:4]:

@@ -145,10 +145,22 @@ def get_sig_pubkey(ops):
     return None, None
 
 def der_decode_sig(sig):
-    leftlen = int.from_bytes(sig[3:4], 'big')
-    left = sig[4:4+leftlen]
-    rightlen = int.from_bytes(sig[5+leftlen:6+leftlen], 'big')
-    right = sig[6+leftlen:6+leftlen+rightlen]
+    from btclib.base import SerializationError
+    if len(sig) < 9 or sig[0] != 0x30:
+        raise SerializationError('invalid DER signature: missing SEQUENCE tag')
+    if sig[2] != 0x02:
+        raise SerializationError('invalid DER signature: expected INTEGER tag for R')
+    leftlen = sig[3]
+    if len(sig) < 4 + leftlen + 2:
+        raise SerializationError('invalid DER signature: truncated R value')
+    left = sig[4:4 + leftlen]
+    rpos = 4 + leftlen
+    if sig[rpos] != 0x02:
+        raise SerializationError('invalid DER signature: expected INTEGER tag for S')
+    rightlen = sig[rpos + 1]
+    if len(sig) < rpos + 2 + rightlen:
+        raise SerializationError('invalid DER signature: truncated S value')
+    right = sig[rpos + 2:rpos + 2 + rightlen]
     return (int.from_bytes(left, 'big'), int.from_bytes(right, 'big'))
 
 def get_multisig_pubkeys(script_bytes):

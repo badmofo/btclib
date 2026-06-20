@@ -82,7 +82,7 @@ class CompactSize(Serializable):
             size = int.from_bytes(read_fully(f, extra), 'little')
         return size
 
-def List(ser):
+def List(ser, max_items=10000):
     class ListClass(Serializable):
         @classmethod
         def serialize(cls, obj):
@@ -91,8 +91,10 @@ def List(ser):
         @classmethod
         def deserialize(cls, f):
             size = CompactSize.deserialize(f)
+            if size > max_items:
+                raise SerializationError('list too large: %d items (max %d)' % (size, max_items))
             return [ser.deserialize(f) for i in range(size)]
-    
+
     return ListClass
 
 def UnsignedInteger(bits=32, endian='little'):
@@ -117,7 +119,7 @@ class LittleEndianHash256(Serializable):
         return read_fully(f, 32)[::-1]
 
 class VarBytestring(Serializable):
-    MAX_SIZE = 0xFFFFFFFF
+    MAX_SIZE = 4 * 1024 * 1024  # 4 MiB; Script subclass tightens this to 10 000
     
     @classmethod
     def serialize(cls, obj):
@@ -317,26 +319,43 @@ class Transaction(Serializable):
             return False
 
     def signature_form(self, i, script_pubkey, sighash=SIGHASH_ALL):
-        tx = copy.deepcopy(self)
-        for input in tx.inputs:
-            input.script = b''
-        tx.inputs[i].script = script_pubkey
-        if (sighash & 0x1f) == SIGHASH_NONE:
-            tx.outputs = []
-            for j,input in enumerate(tx.inputs):
-                if j != i:
-                    input.sequence = 0
-        if (sighash & 0x1f) == SIGHASH_SINGLE:
-            tx.outputs = tx.outputs[:i+1]
-            for output in tx.outputs[:i]:
-                output.script = b''
-                output.value = 0xffffffffffffffff
-            for j,input in enumerate(tx.inputs):
-                if j != i:
-                    input.sequence = 0
-        if (sighash & SIGHASH_ANYONECANPAY):
-            tx.inputs = [tx.inputs[i]]
-        return self.serialize(tx) + (sighash).to_bytes(4, 'little')
+        base = sighash & 0x1f
+        anyonecanpay = bool(sighash & SIGHASH_ANYONECANPAY)
+        out = self.version.to_bytes(4, 'little')
+
+        if anyonecanpay:
+            inp = self.inputs[i]
+            out += CompactSize.serialize(1)
+            out += LittleEndianHash256.serialize(inp.txid)
+            out += inp.n.to_bytes(4, 'little')
+            out += Script.serialize(script_pubkey)
+            out += inp.sequence.to_bytes(4, 'little')
+        else:
+            out += CompactSize.serialize(len(self.inputs))
+            for j, inp in enumerate(self.inputs):
+                out += LittleEndianHash256.serialize(inp.txid)
+                out += inp.n.to_bytes(4, 'little')
+                out += Script.serialize(script_pubkey if j == i else b'')
+                seq = 0 if j != i and base in (SIGHASH_NONE, SIGHASH_SINGLE) else inp.sequence
+                out += seq.to_bytes(4, 'little')
+
+        if base == SIGHASH_NONE:
+            out += CompactSize.serialize(0)
+        elif base == SIGHASH_SINGLE:
+            out += CompactSize.serialize(i + 1)
+            for k in range(i + 1):
+                if k < i:
+                    out += (0xffffffffffffffff).to_bytes(8, 'little')
+                    out += Script.serialize(b'')
+                else:
+                    out += self.outputs[k].value.to_bytes(8, 'little')
+                    out += Script.serialize(self.outputs[k].script)
+        else:
+            out += List(TxOutput).serialize(self.outputs)
+
+        out += self.lock_time.to_bytes(4, 'little')
+        out += sighash.to_bytes(4, 'little')
+        return out
 
     def signature_hash(self, i, script_pubkey, sighash=SIGHASH_ALL):
         one = (1).to_bytes(32, 'little')

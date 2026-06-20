@@ -41,19 +41,22 @@ def b58encode(s):
     return '1' * leading_zero_bytes + result
 
 def b58decode(s):
+    if len(s) > 200:
+        raise ValueError('base58 input too long')
     s = as_bytes(s)
     leading_zero_bytes = len(re.match(b'^1*', s).group(0))
     code_string = b'123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
     base = len(code_string)
     result = 0
-    while s:
+    for c in s:
         result *= base
-        found = code_string.find(s[0])
+        found = code_string.find(c)
         if found == -1:
-            raise ValueError('invalid base58 character', s[0])
+            raise ValueError('invalid base58 character', c)
         result += found
-        s = s[1:]
-    return  b'\x00' * leading_zero_bytes + result.to_bytes(math.ceil(result.bit_length()/8), 'big')
+    if result == 0:
+        return b'\x00' * leading_zero_bytes
+    return b'\x00' * leading_zero_bytes + result.to_bytes(math.ceil(result.bit_length() / 8), 'big')
 
 def b58check_encode(data, version=b'\x00'):
     version_data = version + data
@@ -456,6 +459,8 @@ def message_verify(message, signature):
 
 def bip32_deserialize(data):
     vbyte, data = b58check_decode(data, 4)
+    if len(data) != 74:
+        raise ValueError('invalid bip32 key: expected 74 bytes, got %d' % len(data))
     depth = data[0]
     fingerprint = data[1:5]
     i = int.from_bytes(data[5:9], 'big')
@@ -593,21 +598,27 @@ def derive_electrum(master_pubkey, n, for_change=0):
 # See: http://docs.electrum.org/en/latest/transactions.html
 def derive_compact_xpub(compact_xpub):
     ''' Return (xpub, path, pub) as (HDPublicKey, list, PublicKey)'''
-    if compact_xpub[0] == 0xff: # bip32 xpub
+    if not compact_xpub:
+        return None, None, None
+    if compact_xpub[0] == 0xff: # bip32 xpub: 1 prefix + 78 xpub data + 4 path = 83 bytes minimum
+        if len(compact_xpub) < 83:
+            return None, None, None
         data = compact_xpub[1:79]
-        path = compact_xpub[79:]
+        path = compact_xpub[79:83]
         if len(path) != 4:
-            return None
+            return None, None, None
         path = [int.from_bytes(path[0:2], 'little'), int.from_bytes(path[2:4], 'little')]
         xpub = HDPublicKey.from_xpub(b58check_encode(data[1:], data[:1]))
         derived = xpub.derive_path(path).pub()
         return xpub, path, derived
-    elif compact_xpub[0] == 0xfe: # electrum 1.x xpub
+    elif compact_xpub[0] == 0xfe: # electrum 1.x xpub: 1 prefix + 128 pubkey bytes + 4 path = 133 bytes minimum
+        if len(compact_xpub) < 133:
+            return None, None, None
         master_public_key_hex = b'04' + compact_xpub[1:129]
         master_public_key = PublicKey(bytes.fromhex(master_public_key_hex.decode('utf-8')))
-        path = compact_xpub[129:]
+        path = compact_xpub[129:133]
         if len(path) != 4:
-            return None
+            return None, None, None
         for_change, n = [int.from_bytes(path[0:2], 'little'), int.from_bytes(path[2:4], 'little')]
         pub = derive_electrum(master_public_key, n, for_change)
         return master_public_key, (for_change, n), pub
